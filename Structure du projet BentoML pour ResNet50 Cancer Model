@@ -1,0 +1,97 @@
+## Structure du projet BentoML pour ResNet50 Cancer Model
+
+# 1. cancer_train.py
+# (Si besoin d'entraîner un modèle, mais ici on part d'un .h5 déjà prêt)
+
+# 2. service.py
+import bentoml
+import tensorflow as tf
+import numpy as np
+from bentoml.io import NumpyNdarray
+
+model = tf.keras.models.load_model("model_resnet50_cancer_20250528_163309 (2).h5")
+bento_model = bentoml.tensorflow.save_model("cancer_resnet50_model", model)
+
+model_ref = bentoml.tensorflow.get("cancer_resnet50_model:latest")
+model_runner = model_ref.to_runner()
+
+svc = bentoml.Service("cancer_classifier", runners=[model_runner])
+
+@svc.api(input=NumpyNdarray(dtype="float32", shape=(-1, 224, 224, 3)), output=NumpyNdarray())
+def predict(input_data):
+    return model_runner.run(input_data)
+
+# 3. bentofile.yaml
+service: "service:svc"
+labels:
+  owner: manza
+  project: cancer-deploy
+include:
+  - "*.py"
+  - "*.h5"
+docker:
+  distro: debian
+
+# 4. README.md (Instructions)
+
+## 🔧 Installation
+```bash
+pip install bentoml tensorflow
+```
+
+## 📦 Sauvegarde du modèle (déjà fourni)
+Placer `model_resnet50_cancer_20250528_163309 (2).h5` dans le dossier du projet.
+
+## 🚀 Construction du service Bento
+```bash
+python service.py     # Sauvegarde le modèle dans le store BentoML
+bentoml build          # Crée le bento
+bentoml containerize cancer_classifier:latest  # Image Docker prête à déployer
+```
+
+## 🐳 Déploiement (Docker)
+```bash
+docker run -it --rm -p 3000:3000 cancer_classifier:latest
+```
+
+Accède à la doc interactive ici : [http://localhost:3000/docs](http://localhost:3000/docs)
+
+## ☁️ Déploiement (Kubernetes)
+Déploiement possible via ce `deployment.yaml` :
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cancer-model
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cancer
+  template:
+    metadata:
+      labels:
+        app: cancer
+    spec:
+      containers:
+      - name: cancer
+        image: cancer_classifier:latest
+        ports:
+        - containerPort: 3000
+```
+
+## 📊 Monitoring Prometheus
+L'endpoint `/metrics` est automatiquement exposé. Exemple Prometheus scrape config :
+```yaml
+scrape_configs:
+  - job_name: 'cancer-api'
+    static_configs:
+      - targets: ['cancer-model.default.svc.cluster.local:3000']
+```
+
+## ✅ Test
+```bash
+curl -X POST http://localhost:3000/predict \
+  -H "Content-Type: application/json" \
+  -d '[[[[...224x224 image values...]]]]'
+```
